@@ -1,0 +1,46 @@
+### File nay dung de THU API truc quan: mo bang VS Code (cai extension "REST Client")
+### hoac Visual Studio, roi bam "Send Request" ngay tren tung dong ###.
+
+@host = http://localhost:5113
+
+### Danh sach san pham (du lieu that)
+GET {{host}}/api/products
+
+### Danh sach don hang
+GET {{host}}/api/orders
+
+### OCP - cac phuong thuc van chuyen
+GET {{host}}/api/shipping/methods
+
+### OCP - AP DUNG (Strategy): Express -> 30.000
+GET {{host}}/api/shipping/fee-preview?method=Express&itemsAmount=450000
+
+### OCP - AP DUNG: International (loai mo rong) -> 200.000
+GET {{host}}/api/shipping/fee-preview?method=International&itemsAmount=450000
+
+### OCP - VI PHAM (switch-case): Express -> 30.000
+GET {{host}}/api/shipping/legacy-fee-preview?method=Express&itemsAmount=450000
+
+### SRP - AP DUNG: dat hang chuan
+POST {{host}}/api/orders
+Content-Type: application/json
+
+{ "customerName": "Le Van C", "email": "c@shop.vn", "productId": 1, "quantity": 2, "shippingMethod": 2 }
+
+### SRP - VI PHAM: dat hang bang God class
+POST {{host}}/api/orders/bad
+Content-Type: application/json
+
+{ "customerName": "Bad Guy", "email": "bad@shop.vn", "productId": 4, "quantity": 1, "shippingMethod": 3 }
+
+### LOI - san pham khong ton tai -> 404
+POST {{host}}/api/orders
+Content-Type: application/json
+
+{ "customerName": "Nguyen Test", "email": "t@shop.vn", "productId": 999, "quantity": 1, "shippingMethod": 1 }
+
+### LOI - vuot ton kho -> 400
+POST {{host}}/api/orders
+Content-Type: application/json
+
+{ "customerName": "Nguyen Test", "email": "t@shop.vn", "productId": 3, "quantity": 50, "shippingMethod": 1 }

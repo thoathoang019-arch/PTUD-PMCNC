@@ -1,0 +1,25 @@
+# Chay app backend duoi USER RIENG (appuser), tu khoi dong lai khi loi.
+# Cai: sudo cp onlineshop.service /etc/systemd/system/ && sudo systemctl daemon-reload
+#      sudo systemctl enable --now onlineshop
+[Unit]
+Description=OnlineShop backend API (chay bang user rieng, khong root)
+After=network.target
+
+[Service]
+Type=simple
+User=appuser
+Group=appgrp
+WorkingDirectory=/opt/onlineshop/app
+Environment=ASPNETCORE_URLS=http://localhost:5113
+Environment=DOTNET_ENVIRONMENT=Production
+Environment=HOME=/opt/onlineshop/logs
+ExecStart=/usr/bin/dotnet /opt/onlineshop/app/OnlineShopMini.dll
+Restart=on-failure
+RestartSec=5
+# Tang cuong bao mat (least privilege)
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/onlineshop/logs
+
+[Install]
+WantedBy=multi-user.target

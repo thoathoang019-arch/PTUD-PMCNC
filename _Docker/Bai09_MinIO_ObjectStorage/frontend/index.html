@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OnlineShop — MinIO Object Storage Demo</title>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:'Segoe UI',Tahoma,sans-serif;background:#f5f7fa;color:#333}
+        .header{background:linear-gradient(135deg,#f093fb,#f5576c);color:#fff;padding:20px 40px}
+        .header h1{font-size:1.8rem}.header p{opacity:.9;margin-top:4px;font-size:.95rem}
+        .container{max-width:960px;margin:30px auto;padding:0 20px}
+        .card{background:#fff;border-radius:10px;padding:24px;margin-bottom:20px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+        .card h2{color:#f5576c;margin-bottom:12px;font-size:1.2rem}
+        .btn{background:#f5576c;color:#fff;border:none;padding:10px 20px;border-radius:6px;cursor:pointer;font-size:.95rem;margin-right:8px;margin-bottom:8px;transition:background .2s}
+        .btn:hover{background:#e04460}.btn.green{background:#27ae60}.btn.green:hover{background:#219150}
+        .btn.blue{background:#3498db}.btn.blue:hover{background:#2980b9}
+        .btn.orange{background:#e67e22}.btn.orange:hover{background:#d35400}
+        .btn.red{background:#e74c3c}.btn.red:hover{background:#c0392b}
+        .btn:disabled{opacity:.5;cursor:not-allowed}
+        input[type=file]{margin-bottom:10px;display:block}
+        select,input[type=text]{padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:.9rem;margin-right:8px;margin-bottom:8px}
+        #result{background:#1e1e2e;color:#a6e3a1;padding:16px;border-radius:8px;margin-top:16px;font-family:'Fira Code','Consolas',monospace;font-size:.85rem;white-space:pre-wrap;word-break:break-all;min-height:60px;max-height:400px;overflow-y:auto}
+        .info-box{background:#fef3f2;border-left:4px solid #f5576c;padding:12px 16px;border-radius:0 8px 8px 0;margin-bottom:16px;font-size:.9rem}
+        .file-list{display:grid;gap:8px;margin-top:12px}
+        .file-item{display:flex;align-items:center;justify-content:space-between;background:#f8f9fa;padding:10px 14px;border-radius:8px;font-size:.85rem}
+        .file-item .name{font-weight:600;color:#333;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .file-item .size{color:#888;margin:0 12px;white-space:nowrap}
+        .file-item .actions{display:flex;gap:4px}
+        .file-item .actions button{padding:4px 10px;font-size:.8rem;border-radius:4px}
+        .footer{text-align:center;padding:20px;color:#888;font-size:.85rem}
+        .preview-img{max-width:300px;max-height:200px;border-radius:8px;margin-top:10px;border:2px solid #eee}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📦 MinIO Object Storage Demo</h1>
+        <p>Bài 9 — Upload, Download, Move, Delete, Presigned URL | Nhóm 6</p>
+    </div>
+    <div class="container">
+        <!-- Upload -->
+        <div class="card">
+            <h2>⬆️ 1. Upload File</h2>
+            <div class="info-box">Upload file lên MinIO bucket <code>onlineshop-files</code>. Có thể chọn folder ảo (virtual folder) để tổ chức file.</div>
+            <input type="file" id="uploadFile">
+            <div style="display:flex;align-items:center;flex-wrap:wrap">
+                <label style="font-size:.9rem;margin-right:8px">Folder (tuỳ chọn):</label>
+                <input type="text" id="uploadFolder" placeholder="images, documents, avatars..." style="width:200px">
+                <button class="btn" onclick="uploadFile()">Upload</button>
+            </div>
+        </div>
+
+        <!-- Upload Avatar (use case thực tế) -->
+        <div class="card">
+            <h2>👤 2. Upload Ảnh Đại Diện (Use Case Thực Tế)</h2>
+            <div class="info-box">Minh hoạ: app backend lưu ảnh đại diện người dùng lên MinIO. Object key cố định theo userId → upload lại sẽ ghi đè.</div>
+            <input type="file" id="avatarFile" accept="image/*">
+            <div style="display:flex;align-items:center;flex-wrap:wrap">
+                <label style="font-size:.9rem;margin-right:8px">User ID:</label>
+                <input type="text" id="avatarUserId" placeholder="user-001" value="user-001" style="width:140px">
+                <button class="btn orange" onclick="uploadAvatar()">Upload Avatar</button>
+            </div>
+            <div id="avatarPreview"></div>
+        </div>
+
+        <!-- List Objects -->
+        <div class="card">
+            <h2>📋 3. Liệt Kê Objects trong Bucket</h2>
+            <div style="display:flex;align-items:center;flex-wrap:wrap">
+                <label style="font-size:.9rem;margin-right:8px">Prefix (lọc):</label>
+                <input type="text" id="listPrefix" placeholder="images/, avatars/..." style="width:200px">
+                <button class="btn blue" onclick="listObjects()">Liệt kê</button>
+            </div>
+            <div id="fileList" class="file-list"></div>
+        </div>
+
+        <!-- Move / Rename -->
+        <div class="card">
+            <h2>✏️ 4. Move / Rename Object</h2>
+            <div class="info-box">MinIO/S3 không có lệnh "move" — SDK copy sang vị trí mới rồi xóa bản gốc.</div>
+            <div style="display:flex;align-items:center;flex-wrap:wrap">
+                <input type="text" id="moveSource" placeholder="Source key (vd: images/old.jpg)" style="width:260px">
+                <span style="margin:0 8px">→</span>
+                <input type="text" id="moveDest" placeholder="Dest key (vd: archive/new.jpg)" style="width:260px">
+                <button class="btn orange" onclick="moveObject()">Move</button>
+            </div>
+        </div>
+
+        <!-- Kết quả -->
+        <div class="card">
+            <h2>📋 Kết quả API Response</h2>
+            <div id="result">// Kết quả sẽ hiện ở đây khi bạn thao tác...</div>
+        </div>
+
+        <!-- MinIO GUI -->
+        <div class="card">
+            <h2>🖥️ MinIO Web Console (GUI)</h2>
+            <div class="info-box">MinIO cung cấp giao diện web để quản lý bucket và object trực quan. Truy cập tại port 9001.</div>
+            <a href="http://localhost:9001" target="_blank" class="btn green" style="text-decoration:none;display:inline-block">Mở MinIO Console ↗</a>
+            <p style="margin-top:8px;font-size:.85rem;color:#888">Login: <code>minioadmin</code> / <code>minioadmin</code></p>
+        </div>
+    </div>
+    <div class="footer">&copy; 2026 OnlineShop — Bài 9: MinIO Object Storage | PTUD PMCNC</div>
+
+    <script>
+        const R = document.getElementById('result');
+
+        async function uploadFile() {
+            const fileInput = document.getElementById('uploadFile');
+            const folder = document.getElementById('uploadFolder').value.trim();
+            if (!fileInput.files.length) { R.textContent = '❌ Chưa chọn file!'; return; }
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            if (folder) formData.append('folder', folder);
+            R.textContent = '⏳ Đang upload...';
+            try {
+                const res = await fetch('/api/storage/upload', { method: 'POST', body: formData });
+                const data = await res.json();
+                R.textContent = JSON.stringify(data, null, 2);
+                listObjects();
+            } catch (e) { R.textContent = '❌ Lỗi: ' + e.message; }
+        }
+
+        async function uploadAvatar() {
+            const fileInput = document.getElementById('avatarFile');
+            const userId = document.getElementById('avatarUserId').value.trim() || 'user-001';
+            if (!fileInput.files.length) { R.textContent = '❌ Chưa chọn ảnh!'; return; }
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            R.textContent = '⏳ Đang upload avatar...';
+            try {
+                const res = await fetch(`/api/storage/avatar/${userId}`, { method: 'POST', body: formData });
+                const data = await res.json();
+                R.textContent = JSON.stringify(data, null, 2);
+                if (data.avatarUrl) {
+                    document.getElementById('avatarPreview').innerHTML = `<img src="${data.avatarUrl}" class="preview-img" alt="Avatar">`;
+                }
+                listObjects();
+            } catch (e) { R.textContent = '❌ Lỗi: ' + e.message; }
+        }
+
+        async function listObjects() {
+            const prefix = document.getElementById('listPrefix').value.trim();
+            const url = prefix ? `/api/storage/list?prefix=${encodeURIComponent(prefix)}` : '/api/storage/list';
+            try {
+                const res = await fetch(url);
+                const data = await res.json();
+                R.textContent = JSON.stringify(data, null, 2);
+                const list = document.getElementById('fileList');
+                if (!data.objects || data.objects.length === 0) {
+                    list.innerHTML = '<div style="color:#888;font-size:.9rem">Bucket trống hoặc không có file nào khớp prefix.</div>';
+                    return;
+                }
+                list.innerHTML = data.objects.map(o => `
+                    <div class="file-item">
+                        <span class="name" title="${o.objectKey}">${o.objectKey}</span>
+                        <span class="size">${formatSize(o.size)}</span>
+                        <div class="actions">
+                            <button class="btn blue" style="padding:4px 10px;font-size:.8rem" onclick="getPresignedUrl('${o.objectKey}')">🔗 Link</button>
+                            <button class="btn green" style="padding:4px 10px;font-size:.8rem" onclick="downloadFile('${o.objectKey}')">⬇️</button>
+                            <button class="btn red" style="padding:4px 10px;font-size:.8rem" onclick="deleteFile('${o.objectKey}')">🗑️</button>
+                        </div>
+                    </div>`).join('');
+            } catch (e) { R.textContent = '❌ Lỗi: ' + e.message; }
+        }
+
+        async function getPresignedUrl(key) {
+            try {
+                const res = await fetch(`/api/storage/presigned-url?key=${encodeURIComponent(key)}&expiry=3600`);
+                const data = await res.json();
+                R.textContent = JSON.stringify(data, null, 2);
+                if (data.url) window.open(data.url, '_blank');
+            } catch (e) { R.textContent = '❌ Lỗi: ' + e.message; }
+        }
+
+        function downloadFile(key) {
+            window.open(`/api/storage/download?key=${encodeURIComponent(key)}`, '_blank');
+        }
+
+        async function deleteFile(key) {
+            if (!confirm(`Xác nhận xóa: ${key}?`)) return;
+            try {
+                const res = await fetch(`/api/storage/delete?key=${encodeURIComponent(key)}`, { method: 'DELETE' });
+                const data = await res.json();
+                R.textContent = JSON.stringify(data, null, 2);
+                listObjects();
+            } catch (e) { R.textContent = '❌ Lỗi: ' + e.message; }
+        }
+
+        async function moveObject() {
+            const src = document.getElementById('moveSource').value.trim();
+            const dst = document.getElementById('moveDest').value.trim();
+            if (!src || !dst) { R.textContent = '❌ Cần nhập cả Source key và Dest key!'; return; }
+            try {
+                const res = await fetch('/api/storage/move', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sourceKey: src, destKey: dst })
+                });
+                const data = await res.json();
+                R.textContent = JSON.stringify(data, null, 2);
+                listObjects();
+            } catch (e) { R.textContent = '❌ Lỗi: ' + e.message; }
+        }
+
+        function formatSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
+            return (bytes/1024/1024).toFixed(1) + ' MB';
+        }
+
+        // Auto-load objects on page load
+        setTimeout(listObjects, 500);
+    </script>
+</body>
+</html>

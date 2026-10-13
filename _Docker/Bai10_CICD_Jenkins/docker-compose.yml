@@ -1,0 +1,211 @@
+# ===================================================================
+# DOCKER COMPOSE — BÀI 10: CI/CD VỚI JENKINS
+# ===================================================================
+# Mục đích: Chạy LOCAL DEVELOPMENT environment
+# Gồm: PostgreSQL + Redis + Backend (build từ source) + Frontend + NGINX
+#
+# ĐÂY LÀ MÔI TRƯỜNG DEV, KHÔNG PHẢI MÔI TRƯỜNG CD!
+# - Máy CI (ci-machine/): dùng docker-compose.jenkins.yml → Jenkins
+# - Máy CD (cd-machine/): dùng docker-compose.yml riêng → pull image từ registry
+# - File này: dùng cho developer chạy local để phát triển và test
+#
+# Kế thừa từ Bài 08 (NGINX), Bài 09 (MinIO + multi-service)
+# ===================================================================
+
+services:
+  # =================================================================
+  # DATABASE: PostgreSQL 16
+  # =================================================================
+  # Lưu trữ dữ liệu ứng dụng (products, orders)
+  # Kiến thức tái sử dụng từ Bài 07+
+  db:
+    image: postgres:16-alpine
+    container_name: bai10-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-onlineshop}
+      POSTGRES_USER: ${POSTGRES_USER:-appuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-supersecret}
+    volumes:
+      # Named volume: dữ liệu persist qua restart
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      # Expose cho developer debug bằng pgAdmin/DBeaver
+      - "${DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-appuser} -d ${POSTGRES_DB:-onlineshop}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # === Resource limits (Bài 07+) ===
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    # === Log rotation: tránh log phình to ===
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - app-network
+
+  # =================================================================
+  # CACHE: Redis 7
+  # =================================================================
+  # Cache layer cho ứng dụng (session, rate limiting)
+  redis:
+    image: redis:7-alpine
+    container_name: bai10-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+    networks:
+      - app-network
+
+  # =================================================================
+  # BACKEND: ASP.NET Core (BUILD TỪ SOURCE)
+  # =================================================================
+  # ⚠️ KHÁC BIỆT QUAN TRỌNG VỚI cd-machine/docker-compose.yml:
+  #   - Ở đây: build từ Dockerfile (dùng cho dev)
+  #   - Ở CD:  pull image từ registry (dùng cho deploy)
+  # Đây chính là điểm CI/CD giải quyết:
+  #   Dev build local → CI build + test → Push image → CD pull image
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: bai10-backend
+    restart: unless-stopped
+    environment:
+      # --- Database connection ---
+      ConnectionStrings__DefaultConnection: >-
+        Host=db;Port=5432;
+        Database=${POSTGRES_DB:-onlineshop};
+        Username=${POSTGRES_USER:-appuser};
+        Password=${POSTGRES_PASSWORD:-supersecret}
+      # --- Redis connection ---
+      ConnectionStrings__Redis: "redis:6379"
+      # --- App settings ---
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: "http://+:8080"
+      # --- Version info (CI/CD sẽ set giá trị thật) ---
+      APP_VERSION: "local-dev"
+      BUILD_NUMBER: "0"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/products || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - app-network
+
+  # =================================================================
+  # FRONTEND: SPA trên NGINX
+  # =================================================================
+  # Giao diện demo CI/CD pipeline, unit test, webhook
+  # Pattern giống Bài 08, 09
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: bai10-frontend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+    networks:
+      - app-network
+
+  # =================================================================
+  # NGINX: Reverse Proxy + Load Balancer
+  # =================================================================
+  # Entry point duy nhất cho client (Bài 08)
+  # Route: / → frontend, /api/ → backend
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: bai10-nginx
+    restart: unless-stopped
+    ports:
+      # Port duy nhất expose ra ngoài
+      - "${APP_PORT:-8080}:80"
+    volumes:
+      # Mount config file (bind mount)
+      - ./nginx/conf.d/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+      - frontend
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/nginx-health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+    networks:
+      - app-network
+
+# =================================================================
+# NETWORKS
+# =================================================================
+# Bridge network: các container giao tiếp bằng tên service
+# (Service Discovery — kiến thức từ Bài 07+)
+networks:
+  app-network:
+    driver: bridge
+
+# =================================================================
+# VOLUMES
+# =================================================================
+# Named volumes: dữ liệu persist qua container restart/recreate
+volumes:
+  postgres_data:
+    driver: local

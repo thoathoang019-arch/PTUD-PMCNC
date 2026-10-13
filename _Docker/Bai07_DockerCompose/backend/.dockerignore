@@ -1,0 +1,12 @@
+# Bo cac thu khong can khi build -> image nho & an toan hon
+**/bin/
+**/obj/
+**/.vs/
+.git/
+.gitignore
+**/*.user
+**/.env
+**/appsettings.Development.json
+Dockerfile
+.dockerignore
+*.md

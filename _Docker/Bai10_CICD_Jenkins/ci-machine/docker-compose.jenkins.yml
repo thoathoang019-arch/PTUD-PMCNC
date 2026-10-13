@@ -1,0 +1,46 @@
+# ============================================================
+# Docker Compose — Jenkins CI (Máy A) — Bài 10
+# ============================================================
+# Chạy Jenkins bằng Docker thay vì cài trực tiếp trên Windows.
+#
+# Lưu ý quan trọng:
+#   - Mount docker.sock: cho phép Jenkins gọi Docker Engine của host
+#   - Volume jenkins_home: lưu cấu hình Jenkins, không mất khi restart
+#   - Port 8080: truy cập Jenkins UI
+#   - Port 50000: Jenkins agent communication
+#
+# Cách chạy:
+#   docker compose -f docker-compose.jenkins.yml up -d
+#
+# Lần đầu tiên:
+#   1. Xem initial admin password:
+#      docker compose -f docker-compose.jenkins.yml logs jenkins
+#   2. Mở http://localhost:8080
+#   3. Nhập admin password → cài plugin → tạo admin user
+# ============================================================
+
+services:
+  jenkins:
+    build:
+      context: ./jenkins
+      dockerfile: Dockerfile
+    container_name: jenkins-ci
+    ports:
+      # 8080: Jenkins Web UI
+      - "8080:8080"
+      # 50000: Jenkins agent communication (nếu dùng agent)
+      - "50000:50000"
+    volumes:
+      # Lưu trữ cấu hình Jenkins persistent
+      - jenkins_home:/var/jenkins_home
+      # Mount docker.sock: Jenkins gọi Docker Engine của máy host
+      # ⚠️ Trên Windows Docker Desktop: dùng //var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # Timezone cho Jenkins (hiển thị đúng giờ trong log)
+      - TZ=Asia/Ho_Chi_Minh
+    restart: unless-stopped
+
+volumes:
+  jenkins_home:
+    driver: local

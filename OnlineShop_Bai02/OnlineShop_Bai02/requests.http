@@ -1,0 +1,43 @@
+@host = http://localhost:5113
+
+########## BÀI 1 (kế thừa): SRP + OCP ##########
+### Danh sách sản phẩm
+GET {{host}}/api/products
+
+### OCP - áp dụng (Strategy)
+GET {{host}}/api/shipping/fee-preview?method=Express&itemsAmount=450000
+
+### OCP - vi phạm (switch-case)
+GET {{host}}/api/shipping/legacy-fee-preview?method=Express&itemsAmount=450000
+
+### SRP - đặt hàng chuẩn
+POST {{host}}/api/orders
+Content-Type: application/json
+
+{ "customerName": "Le Van C", "email": "c@shop.vn", "productId": 1, "quantity": 2, "shippingMethod": 2 }
+
+### SRP - đặt hàng God class (vi phạm)
+POST {{host}}/api/orders/bad
+Content-Type: application/json
+
+{ "customerName": "Bad Guy", "email": "bad@shop.vn", "productId": 4, "quantity": 1, "shippingMethod": 3 }
+
+########## BÀI 2: LSP + ISP + DIP (nghiệp vụ e-commerce) ##########
+
+### LSP - VI PHẠM: voucher dùng-1-lần ném Exception -> sập API (500)
+GET {{host}}/api/lsp/violation?orderAmount=500000
+
+### LSP - GIẢI PHÁP: trả VoucherResult (success/fail) -> API mượt (200)
+GET {{host}}/api/lsp/solution?orderAmount=500000
+
+### ISP - VI PHẠM: Customer bị ép DeleteOrder -> NotSupportedException
+GET {{host}}/api/isp/violation
+
+### ISP - GIẢI PHÁP: tách IOrderReadService / IOrderManageService
+GET {{host}}/api/isp/solution
+
+### DIP - VI PHẠM: new EmailSender + GetType().Name
+GET {{host}}/api/dip/violation?customer=Le Van C&contact=c@shop.vn&total=300000
+
+### DIP - GIẢI PHÁP: inject IOrderStore + INotificationSender qua DI
+GET {{host}}/api/dip/solution?customer=Le Van C&contact=0900123456&total=300000

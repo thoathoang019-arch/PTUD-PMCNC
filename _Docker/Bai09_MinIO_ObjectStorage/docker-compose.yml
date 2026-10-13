@@ -1,0 +1,228 @@
+# ============================================================
+# Docker Compose — Bài 09: MinIO Object Storage
+# ============================================================
+# Kiến trúc 6 services:
+#
+#   ┌─────────┐
+#   │ Client  │
+#   └────┬────┘
+#        │ :80
+#   ┌────▼────┐
+#   │  NGINX  │ Reverse Proxy + Load Balancer (Bài 08)
+#   └──┬──┬───┘
+#      │  │
+#  ┌───▼┐ ┌▼────────┐
+#  │ FE │ │ Backend  │ ←── scale được (--scale backend=N)
+#  └────┘ └───┬──┬───┘
+#             │  │
+#     ┌───────▼┐ ┌▼──────┐   ┌────────┐
+#     │   DB   │ │ Redis  │   │ MinIO  │ :9000 (S3 API)
+#     │Postgres│ │        │   │        │ :9001 (Console)
+#     └────────┘ └────────┘   └────────┘
+#
+# Tái sử dụng từ Bài 07 + Bài 08:
+#   - Service discovery: container gọi nhau bằng tên service
+#   - Healthcheck, resource limits, log rotation
+#   - Scale backend: docker compose up --scale backend=3
+#
+# MỚI ở Bài 09:
+#   - MinIO service: S3-compatible Object Storage
+#   - Volume: lưu trữ dữ liệu MinIO persistent
+#   - Environment: MINIO_ROOT_USER / MINIO_ROOT_PASSWORD
+# ============================================================
+
+services:
+
+  # ── Database: PostgreSQL ──────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - app-network
+
+  # ── Cache: Redis ──────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - app-network
+
+  # ── MinIO: S3-Compatible Object Storage ───────────────────
+  # ĐÂY LÀ PHẦN MỚI CỦA BÀI 09
+  #
+  # MinIO là gì?
+  #   - Object Storage tương thích S3 API
+  #   - Có thể chạy self-hosted (Docker) hoặc cloud
+  #   - Dùng để lưu file: ảnh, tài liệu, backup, ...
+  #
+  # 2 port:
+  #   - 9000: S3 API (SDK kết nối qua đây)
+  #   - 9001: Web Console (quản lý qua trình duyệt)
+  #
+  # Authentication:
+  #   - MINIO_ROOT_USER + MINIO_ROOT_PASSWORD
+  #   - Tương đương Access Key + Secret Key của AWS S3
+  #
+  # Command: "server /data" — khởi chạy MinIO server
+  #   --console-address ":9001" — chỉ định port cho Web Console
+  # ───────────────────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      # Access Key và Secret Key để xác thực
+      # ⚠️ BẢO MẬT: Trong production, KHÔNG hardcode — dùng .env
+      # Nếu dùng key thật của AWS S3 / Cloudflare R2 → TUYỆT ĐỐI
+      # không để lộ trong code hoặc public repository!
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      # 9000: S3 API — Backend kết nối qua port này
+      # Presigned URLs cũng cần port này từ browser
+      - "9000:9000"
+      # 9001: Web Console — Mở http://localhost:9001 để quản lý
+      - "9001:9001"
+    volumes:
+      # Volume để dữ liệu MinIO tồn tại sau khi container restart
+      # Nếu không mount volume → dữ liệu mất khi container bị xóa
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - app-network
+
+  # ── Backend: ASP.NET Core (Clean Architecture) ────────────
+  # Có thể scale: docker compose up --scale backend=3
+  # KHÔNG đặt container_name để cho phép scale
+  # Backend kết nối MinIO qua tên service: minio:9000
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      # Database & Cache (tái sử dụng từ Bài 07)
+      - ConnectionStrings__DefaultConnection=Host=${DB_HOST};Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
+      - Redis__ConnectionString=${REDIS_HOST}:6379
+      # MinIO configuration — MỚI ở Bài 09
+      # Backend dùng tên service "minio" để kết nối (Docker DNS)
+      - MinIO__Endpoint=${MINIO_ENDPOINT}
+      - MinIO__AccessKey=${MINIO_ACCESS_KEY}
+      - MinIO__SecretKey=${MINIO_SECRET_KEY}
+      - MinIO__BucketName=${MINIO_BUCKET_NAME}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - app-network
+
+  # ── Frontend: SPA served by NGINX ─────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+    networks:
+      - app-network
+
+  # ── NGINX: Reverse Proxy + Load Balancer ──────────────────
+  # Tái sử dụng kiến thức Bài 08
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    depends_on:
+      - frontend
+      - backend
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+    networks:
+      - app-network
+
+# ── Volumes ──────────────────────────────────────────────────
+# Named volumes: dữ liệu tồn tại khi container restart/recreate
+volumes:
+  postgres_data:
+    driver: local
+  minio_data:       # ← MỚI: lưu trữ objects của MinIO
+    driver: local
+
+# ── Network ──────────────────────────────────────────────────
+# Tất cả services cùng network → gọi nhau bằng tên service
+# VD: backend gọi MinIO bằng "minio:9000" (không cần IP)
+networks:
+  app-network:
+    driver: bridge

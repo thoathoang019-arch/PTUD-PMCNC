@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Module CHỈ phụ thuộc Shared (hợp đồng), KHÔNG phụ thuộc module khác. -->
+    <ProjectReference Include="..\..\ECommerce.Shared\ECommerce.Shared.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Project "Shared": chỉ chứa HỢP ĐỒNG (interface) + EVENT dùng chung giữa các module.
+       Đây là nơi đặt các "đường cắt" — module khác chỉ phụ thuộc vào đây, KHÔNG phụ thuộc
+       vào chi tiết cài đặt bên trong của nhau. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- FrameworkReference: lấy sẵn IServiceCollection, ILogger, IHostedService... từ ASP.NET Core
+         mà không cần thêm nhiều gói NuGet lẻ. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+</Project>

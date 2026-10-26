@@ -1,0 +1,41 @@
+# ===================================================================
+# docker-compose.yml — Bài 12: Modular Monolith + RabbitMQ
+# ===================================================================
+# Chạy RabbitMQ broker + app (ở chế độ Messaging:Mode=RabbitMq).
+#   docker compose up -d --build
+#   App:              http://localhost:8080
+#   RabbitMQ Mgmt UI: http://localhost:15672  (guest/guest) — xem Exchange/Queue/message
+# ===================================================================
+
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: bai12-rabbitmq
+    ports:
+      - "5672:5672"      # AMQP (app kết nối)
+      - "15672:15672"    # Management UI (xem queue/message bằng trình duyệt)
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bai12-api
+    environment:
+      ASPNETCORE_URLS: "http://+:8080"
+      # Dùng RabbitMQ thật (ghi đè appsettings qua biến môi trường, dấu __ = lồng cấp)
+      Messaging__Mode: "RabbitMq"
+      Messaging__RabbitMq__HostName: "rabbitmq"
+      Inventory__Mode: "InProcess"
+    ports:
+      - "8080:8080"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy

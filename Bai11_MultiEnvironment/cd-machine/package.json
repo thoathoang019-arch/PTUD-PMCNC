@@ -1,0 +1,10 @@
+{
+  "name": "bai11-webhook-listener",
+  "version": "1.0.0",
+  "description": "Webhook listener cho máy CD — nhận lệnh deploy từ Jenkins (Bài 11).",
+  "main": "webhook-listener.js",
+  "scripts": {
+    "start": "node webhook-listener.js"
+  },
+  "private": true
+}

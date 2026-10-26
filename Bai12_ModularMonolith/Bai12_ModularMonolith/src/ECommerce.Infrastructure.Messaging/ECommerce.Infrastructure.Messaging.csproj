@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- RabbitMQ.Client 6.8.1: API đồng bộ cổ điển (CreateModel, ExchangeDeclare, BasicPublish...).
+         Ghim phiên bản để code khớp API (7.x đổi sang async-first, khác hẳn). -->
+    <PackageReference Include="RabbitMQ.Client" Version="6.8.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ECommerce.Shared\ECommerce.Shared.csproj" />
+  </ItemGroup>
+</Project>

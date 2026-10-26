@@ -1,0 +1,64 @@
+// ============================================================
+// Jenkinsfile.rollback — Bài 11: Job ROLLBACK (Parameterized Build)
+// ============================================================
+// Tạo một Jenkins Pipeline Job RIÊNG trỏ vào file này.
+// Khi Staging/Prod gặp lỗi: người vận hành CHỌN môi trường + NHẬP tag cũ,
+// job gọi webhook sang máy CD bảo nó pull đúng tag cũ rồi chạy lại.
+//
+// KHÔNG build lại từ source: rollback cần nhanh và chắc chắn dùng đúng bản
+// đã từng pass test. (Registry vẫn giữ các tag cũ nhờ mỗi build 1 tag riêng.)
+// ============================================================
+
+pipeline {
+    agent any
+
+    parameters {
+        choice(
+            name: 'TARGET_ENV',
+            choices: ['staging', 'prod', 'dev'],
+            description: 'Môi trường cần rollback')
+        string(
+            name: 'IMAGE_TAG',
+            defaultValue: '',
+            description: 'Tag CŨ cần quay về, ví dụ: staging-41 hoặc prod-6')
+    }
+
+    environment {
+        DEPLOY_TOKEN = credentials('cd-deploy-token')
+    }
+
+    stages {
+        stage('Validate') {
+            steps {
+                script {
+                    if (!params.IMAGE_TAG?.trim()) {
+                        error('⚠️ Chưa nhập IMAGE_TAG (tag cũ cần quay về).')
+                    }
+                    env.CD_IP = (params.TARGET_ENV == 'prod')    ? '192.168.1.13' :
+                                (params.TARGET_ENV == 'staging') ? '192.168.1.12' : '192.168.1.11'
+                    env.CD_URL = "http://${env.CD_IP}:9000/deploy"
+                    echo "Rollback ${params.TARGET_ENV} -> tag ${params.IMAGE_TAG} tại ${env.CD_URL}"
+                }
+            }
+        }
+
+        stage('Trigger Rollback') {
+            steps {
+                echo "⏪ Gọi webhook rollback: ${env.CD_URL} (tag=${params.IMAGE_TAG})"
+                sh """
+                    curl -X POST ${env.CD_URL} \
+                        -H 'Content-Type: application/json' \
+                        -H 'X-Deploy-Token: ${DEPLOY_TOKEN}' \
+                        -d '{ "tag": "${params.IMAGE_TAG}", "rollback": true }' \
+                        --connect-timeout 10 --max-time 60
+                """
+                echo "✅ Đã yêu cầu máy CD chạy lại tag cũ ${params.IMAGE_TAG} (không build lại)."
+            }
+        }
+    }
+
+    post {
+        success { echo "✅ ROLLBACK OK — ${params.TARGET_ENV} quay về ${params.IMAGE_TAG}" }
+        failure { echo "❌ ROLLBACK FAIL — kiểm tra máy CD ${env.CD_IP} còn sống/đủ tag không." }
+    }
+}

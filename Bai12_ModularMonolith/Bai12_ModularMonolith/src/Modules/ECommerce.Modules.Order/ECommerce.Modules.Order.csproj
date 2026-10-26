@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Order chỉ biết Shared (IInventoryService, IEventBus, OrderCreatedEvent).
+         KHÔNG tham chiếu project Inventory -> hai module tách biệt thật sự. -->
+    <ProjectReference Include="..\..\ECommerce.Shared\ECommerce.Shared.csproj" />
+  </ItemGroup>
+</Project>

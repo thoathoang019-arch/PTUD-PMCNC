@@ -1,0 +1,29 @@
+@host = http://localhost:5113
+
+### Danh sach san pham
+GET {{host}}/api/products
+Accept: application/json
+
+### OCP - tinh phi ship chuan (Strategy)
+GET {{host}}/api/shipping/fee-preview?method=Express&itemsAmount=450000
+Accept: application/json
+
+### OCP - tinh phi ship legacy (switch-case, vi pham)
+GET {{host}}/api/shipping/legacy-fee-preview?method=Express&itemsAmount=450000
+Accept: application/json
+
+### Danh sach don hang
+GET {{host}}/api/orders
+Accept: application/json
+
+### SRP - dat hang chuan
+POST {{host}}/api/orders
+Content-Type: application/json
+
+{ "customerName": "Le Van C", "email": "c@shop.vn", "productId": 1, "quantity": 2, "shippingMethod": 2 }
+
+### SRP - dat hang vi pham (God class)
+POST {{host}}/api/orders/bad
+Content-Type: application/json
+
+{ "customerName": "Le Van C", "email": "c@shop.vn", "productId": 1, "quantity": 2, "shippingMethod": 2 }

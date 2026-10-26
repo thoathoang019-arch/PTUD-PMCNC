@@ -1,0 +1,62 @@
+# ===================================================================
+# docker-compose.cd.yml — MÁY CD (Staging / Production)
+# ===================================================================
+# KHÁC docker-compose.yml ở gốc (máy Dev):
+#   - KHÔNG build từ source. PULL image theo tag từ Registry (image bất biến).
+#   - Bind-mount file secret THẬT của máy host vào container lúc chạy
+#     -> image hoàn toàn "sạch" secret, cùng 1 image chạy đúng ở mọi môi trường.
+#
+# Các biến đọc từ file .env cùng thư mục (xem .env.example). deploy.sh sẽ ghi .env này.
+#   REGISTRY, IMAGE_NAME, IMAGE_TAG, ASPNETCORE_ENVIRONMENT, SECRET_FILE, APP_PORT
+# ===================================================================
+
+services:
+  backend:
+    # Pull đúng tag CI đã build & push (vd: myapp:staging-42). KHÔNG dùng "latest".
+    image: "${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+    pull_policy: always
+    container_name: bai11-cd-backend
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: "${ASPNETCORE_ENVIRONMENT}"
+      ASPNETCORE_URLS: "http://+:8080"
+      # Build tag hiện trên badge FE (FE đọc qua /api/env/info)
+      APP_VERSION: "${IMAGE_TAG}"
+    volumes:
+      # ⭐ Secret THẬT của máy host mount vào ĐÚNG file appsettings.{Env}.json của container.
+      #   Vd Staging: /opt/secrets/appsettings.Staging.json -> /app/appsettings.Staging.json
+      - "${SECRET_FILE}:/app/appsettings.${ASPNETCORE_ENVIRONMENT}.json:ro"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/env/info || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    networks:
+      - app-network
+
+  frontend:
+    image: "${REGISTRY}/${IMAGE_NAME}-frontend:${IMAGE_TAG}"
+    pull_policy: always
+    container_name: bai11-cd-frontend
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: bai11-cd-nginx
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8080}:80"
+    volumes:
+      - ./nginx/conf.d/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

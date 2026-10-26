@@ -1,0 +1,121 @@
+// ============================================================
+// Jenkinsfile — Bài 11: Multibranch Pipeline (Dev / Staging / Prod)
+// ============================================================
+// MỘT Jenkinsfile dùng chung cho cả 3 nhánh. Jenkins Multibranch Job tự phát hiện
+// nhánh (dev/staging/main) và chạy pipeline riêng, rẽ nhánh logic theo env.BRANCH_NAME:
+//   - envName : đặt tên tag image + chọn file cấu hình
+//   - CD IP   : gọi webhook sang đúng máy CD của môi trường đó
+//
+// Giữ nguyên "cửa chặn" của Bài 10: stage Test fail -> pipeline DỪNG, không build/push.
+// Nguyên tắc Bài 11: secret KHÔNG nằm trong image; máy CD tự mount secret lúc chạy.
+// ============================================================
+
+pipeline {
+    agent any
+
+    environment {
+        REGISTRY   = 'registry.local:5000'       // đổi thành registry thật của nhóm
+        IMAGE_NAME = 'myapp'
+        // Token bảo vệ webhook (khớp DEPLOY_TOKEN trên máy CD). Lưu trong Jenkins Credentials.
+        DEPLOY_TOKEN = credentials('cd-deploy-token')
+    }
+
+    stages {
+        // ── Rẽ nhánh theo môi trường: tính envName, tag, IP máy CD ──
+        stage('Resolve Environment') {
+            steps {
+                script {
+                    env.ENV_NAME = (env.BRANCH_NAME == 'main')    ? 'prod'    :
+                                   (env.BRANCH_NAME == 'staging') ? 'staging' : 'dev'
+
+                    env.IMAGE_TAG = "${env.ENV_NAME}-${env.BUILD_NUMBER}"
+
+                    // Mỗi môi trường = 1 máy CD trong LAN (mô phỏng bằng máy thành viên)
+                    env.CD_IP = (env.ENV_NAME == 'prod')    ? '192.168.1.13' :
+                                (env.ENV_NAME == 'staging') ? '192.168.1.12' : '192.168.1.11'
+                    env.CD_URL = "http://${env.CD_IP}:9000/deploy"
+
+                    echo "Nhánh=${env.BRANCH_NAME} -> môi trường=${env.ENV_NAME}, tag=${env.IMAGE_TAG}, CD=${env.CD_URL}"
+                }
+            }
+        }
+
+        stage('Checkout') {
+            steps {
+                echo '📥 Pull code từ private repo...'
+                checkout scm
+                sh 'git log --oneline -3'
+            }
+        }
+
+        // ── CỬA CHẶN: Test fail -> dừng, không build/push ──
+        stage('Test') {
+            steps {
+                echo '🧪 Chạy Unit Test (gồm JwtTokenServiceTests)...'
+                dir('backend') {
+                    sh '''
+                        dotnet restore
+                        dotnet test --no-restore \
+                            --logger "console;verbosity=detailed" \
+                            --results-directory ./TestResults
+                    '''
+                }
+            }
+            post {
+                failure { echo '❌ Test FAILED — pipeline dừng, KHÔNG build image.' }
+                success { echo '✅ Test PASSED.' }
+            }
+        }
+
+        stage('Build Image') {
+            steps {
+                echo "🔨 Build ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+                dir('backend') {
+                    sh "docker build -t ${REGISTRY}/${IMAGE_NAME}:${env.IMAGE_TAG} ."
+                }
+                dir('frontend') {
+                    sh "docker build -t ${REGISTRY}/${IMAGE_NAME}-frontend:${env.IMAGE_TAG} ."
+                }
+                echo "✅ Built tag ${env.IMAGE_TAG}"
+            }
+        }
+
+        stage('Push Image') {
+            steps {
+                echo "📤 Push lên ${REGISTRY}..."
+                withCredentials([usernamePassword(
+                    credentialsId: 'registry-credentials',
+                    usernameVariable: 'REG_USER',
+                    passwordVariable: 'REG_PASS')]) {
+                    sh """
+                        echo \$REG_PASS | docker login ${REGISTRY} -u \$REG_USER --password-stdin
+                        docker push ${REGISTRY}/${IMAGE_NAME}:${env.IMAGE_TAG}
+                        docker push ${REGISTRY}/${IMAGE_NAME}-frontend:${env.IMAGE_TAG}
+                        docker logout ${REGISTRY}
+                    """
+                }
+                echo "✅ Pushed ${env.IMAGE_TAG}. Registry giữ lại tag này để rollback khi cần."
+            }
+        }
+
+        // ── Gọi webhook sang ĐÚNG máy CD của môi trường ──
+        stage('Trigger Deploy') {
+            steps {
+                echo "🚀 Gọi webhook CD: ${env.CD_URL} (tag=${env.IMAGE_TAG})"
+                sh """
+                    curl -X POST ${env.CD_URL} \
+                        -H 'Content-Type: application/json' \
+                        -H 'X-Deploy-Token: ${DEPLOY_TOKEN}' \
+                        -d '{ "tag": "${env.IMAGE_TAG}", "image": "${REGISTRY}/${IMAGE_NAME}", "build_number": "${BUILD_NUMBER}" }' \
+                        --connect-timeout 10 --max-time 60
+                """
+                echo "✅ Đã gửi webhook. Máy CD (${env.CD_IP}) sẽ pull tag ${env.IMAGE_TAG} và chạy."
+            }
+        }
+    }
+
+    post {
+        success { echo "✅ PIPELINE OK — ${env.ENV_NAME} đang chạy ${env.IMAGE_TAG}" }
+        failure { echo "❌ PIPELINE FAIL — không có image mới cho ${env.ENV_NAME}" }
+    }
+}

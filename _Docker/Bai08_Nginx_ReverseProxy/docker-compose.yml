@@ -1,0 +1,178 @@
+# ═══════════════════════════════════════════════════════════════════════
+# docker-compose.yml — Bài 8: NGINX Reverse Proxy & Upstream
+# ═══════════════════════════════════════════════════════════════════════
+# Kiến trúc:
+#   [Client] → [NGINX Reverse Proxy :80/:443]
+#                ├── / → [Frontend Container :80] (file tĩnh)
+#                └── /api/ → upstream [Backend 1 :8080, Backend 2 :8080, ...]
+#                                 ├── [PostgreSQL]
+#                                 └── [Redis]
+#
+# Tái sử dụng: Backend + DB + Redis từ Bài 7 (Docker Compose)
+# Mới thêm:    Frontend container + NGINX Reverse Proxy + SSL
+# ═══════════════════════════════════════════════════════════════════════
+
+services:
+
+  # ── 1) PostgreSQL Database ────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: bai08_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - shop_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── 2) Redis Cache ───────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: bai08_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - shop_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── 3) Backend ASP.NET Core (Multi-instance qua --scale) ────────
+  # Tái sử dụng backend từ Bài 7: Clean Architecture, SOLID, Docker
+  # Không đặt container_name → cho phép scale nhiều instance
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: onlineshop-backend:bai08
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      # Service Discovery: dùng TÊN SERVICE thay vì localhost/IP cứng
+      # (kiến thức Bài 7: container trong cùng Docker network gọi nhau bằng tên)
+      ConnectionStrings__Default: "Server=${DB_HOST};Database=${POSTGRES_DB};User Id=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};"
+      RedisHost: ${REDIS_HOST}
+      # Biến để mỗi instance tự nhận diện (phục vụ demo load balancing)
+      INSTANCE_ID: "backend-$$HOSTNAME"
+    expose:
+      - "8080"    # Chỉ mở nội bộ trong Docker network, KHÔNG expose ra host
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - shop_net
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── 4) Frontend (NGINX phục vụ file tĩnh — container riêng) ────
+  # Mô phỏng cách deploy thực tế: build React/Vue → đóng gói vào NGINX image
+  # proxy_pass trong NGINX chính sẽ trỏ tới tên service "frontend"
+  # thay vì localhost (Service Discovery trong Docker network)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: onlineshop-frontend:bai08
+    container_name: bai08_frontend
+    restart: unless-stopped
+    networks:
+      - shop_net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  # ── 5) NGINX Reverse Proxy (Cổng vào duy nhất của hệ thống) ────
+  # Vai trò:
+  #   - Reverse Proxy: ẩn backend thật, client chỉ thấy NGINX
+  #   - Load Balancer: upstream phân phối request tới nhiều backend
+  #   - SSL Termination: xử lý HTTPS, backend chỉ cần HTTP
+  #   - Phục vụ cả FE (/) lẫn BE (/api/) qua cùng 1 domain
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: bai08_nginx
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - frontend
+    ports:
+      - "80:80"       # HTTP
+      - "443:443"     # HTTPS (SSL mô phỏng)
+    volumes:
+      # Mount file cấu hình NGINX từ host vào container
+      - ./nginx/conf.d/default.conf:/etc/nginx/conf.d/default.conf:ro
+      # Mount thư mục SSL certificates (KHÔNG dùng :ro vì script cần ghi cert vào đây)
+      - ./nginx/ssl:/etc/nginx/ssl
+      # Mount script tạo SSL
+      - ./nginx/generate-ssl.sh:/docker-entrypoint.d/10-generate-ssl.sh:ro
+    networks:
+      - shop_net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# ── Networks & Volumes ────────────────────────────────────────────
+networks:
+  shop_net:
+    driver: bridge
+
+volumes:
+  pg_data:
+  redis_data:

@@ -1,0 +1,199 @@
+// ============================================================
+// Jenkinsfile — Pipeline as Code — Bài 10: CI/CD
+// ============================================================
+// Declarative Pipeline: định nghĩa TOÀN BỘ pipeline bằng code
+// Được lưu TRONG repository (version-control cùng source code)
+//
+// Luồng: Checkout → Test → Build Image → Push Image → Trigger Deploy
+//
+// Vì sao Pipeline as Code tốt hơn cấu hình qua giao diện?
+//   - Version control: xem lại lịch sử thay đổi pipeline
+//   - Code review: team review pipeline như review code
+//   - Reproducible: clone repo = có ngay pipeline
+//   - Không phụ thuộc: mất Jenkins server → cài lại + import Jenkinsfile
+// ============================================================
+
+pipeline {
+    // agent any: chạy trên bất kỳ Jenkins agent nào khả dụng
+    agent any
+
+    // ── Biến môi trường cho pipeline ────────────────────────────────
+    environment {
+        // Registry: Docker Hub hoặc GitHub Container Registry (ghcr.io)
+        // Thay bằng username/org thật của nhóm
+        REGISTRY = 'ghcr.io'
+        IMAGE_NAME = 'your-github-username/onlineshop-api'
+
+        // Tag: dùng BUILD_NUMBER của Jenkins (mỗi build = 1 tag khác nhau)
+        // ⚠️ KHÔNG dùng mãi "latest" — khó biết version nào đang chạy
+        IMAGE_TAG = "${BUILD_NUMBER}"
+
+        // IP máy CD (Máy B) — thay bằng IP thật trong mạng LAN khi demo
+        CD_SERVER = 'http://192.168.1.100:5000'
+
+        // Credentials ID (đã lưu trong Jenkins Credentials)
+        // Xem README phần "Cấu hình Jenkins" để biết cách tạo
+        GIT_CREDENTIALS_ID = 'github-deploy-key'
+        REGISTRY_CREDENTIALS_ID = 'ghcr-token'
+    }
+
+    stages {
+        // ── Stage 1: CHECKOUT — Pull code từ Private Repository ─────
+        // Jenkins dùng Deploy Key (SSH) hoặc PAT (HTTPS) để clone
+        // Vì repo là PRIVATE → phải cấp quyền truy cập rõ ràng
+        stage('Checkout') {
+            steps {
+                echo '📥 Đang pull code từ GitHub Private Repository...'
+                // checkout scm: tự động clone repo đã cấu hình trong Job
+                // Hoặc dùng git command cụ thể:
+                checkout scm
+                // Hiển thị commit hiện tại để biết đang build version nào
+                sh 'git log --oneline -3'
+            }
+        }
+
+        // ── Stage 2: TEST — Chạy Unit Test ──────────────────────────
+        // ĐÂY LÀ BƯỚC QUAN TRỌNG NHẤT CỦA CI
+        //
+        // Vì sao phải có Test trong pipeline?
+        //   - "Build ra được" ≠ "code đúng"
+        //   - Nếu chỉ build → không khác gì build trên máy cá nhân
+        //   - CI thật = build + test tự động TRƯỚC KHI đóng gói
+        //   - Test FAIL → pipeline DỪNG → KHÔNG build/push image
+        //
+        // ⭐ KHI DEMO: Sửa 1 test cho fail → chạy pipeline → thấy DỪNG
+        //    Sau đó sửa lại đúng → chạy lại → pipeline PASS
+        stage('Test') {
+            steps {
+                echo '🧪 Đang chạy Unit Tests...'
+                dir('backend') {
+                    // dotnet test: chạy tất cả test trong solution
+                    // --no-restore: không restore lại packages (đã restore ở build)
+                    // --logger: format output cho Jenkins đọc được
+                    sh '''
+                        dotnet restore
+                        dotnet test --no-restore \
+                            --logger "console;verbosity=detailed" \
+                            --results-directory ./TestResults
+                    '''
+                }
+            }
+            post {
+                failure {
+                    echo '❌ Unit Test FAILED! Pipeline DỪNG — không build image.'
+                    echo '   → Sửa code cho test PASS rồi chạy lại pipeline.'
+                }
+                success {
+                    echo '✅ Tất cả Unit Tests PASSED!'
+                }
+            }
+        }
+
+        // ── Stage 3: BUILD IMAGE — Docker build có gắn TAG ─────────
+        // Chỉ chạy khi Test PASSED (pipeline tự dừng nếu stage trước fail)
+        //
+        // Tag quan trọng:
+        //   - Dùng BUILD_NUMBER: mỗi build = 1 tag (v1, v2, v3...)
+        //   - KHÔNG dùng mãi "latest" — vì không biết version nào đang chạy
+        //   - Có thể dùng commit SHA: git rev-parse --short HEAD
+        stage('Build Image') {
+            steps {
+                echo "🔨 Đang build Docker image: ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+                dir('backend') {
+                    sh """
+                        docker build \
+                            -t ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} \
+                            -t ${REGISTRY}/${IMAGE_NAME}:latest \
+                            .
+                    """
+                }
+                echo "✅ Image built: ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+            }
+        }
+
+        // ── Stage 4: PUSH IMAGE — Đẩy lên Registry ─────────────────
+        // Registry: nơi lưu trữ Docker images (như GitHub cho code)
+        //   - Docker Hub: registry mặc định, phổ biến nhất
+        //   - ghcr.io: GitHub Container Registry — tiện nếu dùng GitHub
+        //
+        // ⚠️ Credentials: KHÔNG hardcode token trong Jenkinsfile!
+        //    Lưu trong Jenkins Credentials, dùng withCredentials {} để inject
+        stage('Push Image') {
+            steps {
+                echo "📤 Đang push image lên ${REGISTRY}..."
+                // withCredentials: inject credential an toàn (không hiện trong log)
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: "${REGISTRY_CREDENTIALS_ID}",
+                        usernameVariable: 'REG_USER',
+                        passwordVariable: 'REG_PASS'
+                    )
+                ]) {
+                    sh """
+                        echo \$REG_PASS | docker login ${REGISTRY} -u \$REG_USER --password-stdin
+                        docker push ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
+                        docker push ${REGISTRY}/${IMAGE_NAME}:latest
+                        docker logout ${REGISTRY}
+                    """
+                }
+                echo "✅ Image pushed: ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+            }
+        }
+
+        // ── Stage 5: TRIGGER DEPLOY — Gọi webhook sang Máy CD ──────
+        // Đây là điểm MẤU CHỐT mô phỏng CD:
+        //   - CI (Máy A) KHÔNG tự chạy app tại chỗ
+        //   - CI đóng gói → push registry → GỌI sang Máy CD (Máy B)
+        //   - Máy CD nhận webhook → pull image → deploy
+        //
+        // Vì sao không dùng GitHub webhook tự động?
+        //   - Jenkins chạy trên máy cá nhân (localhost)
+        //   - Không có domain/IP public → GitHub không gọi vào được
+        //   - Phải bấm "Build Now" THỦ CÔNG
+        //   - Nhưng CHIỀU NGƯỢC LẠI (Jenkins gọi ra) vẫn hoạt động!
+        stage('Trigger Deploy') {
+            steps {
+                echo "🚀 Đang gọi webhook tới máy CD: ${CD_SERVER}/deploy"
+                sh """
+                    curl -X POST ${CD_SERVER}/deploy \
+                        -H 'Content-Type: application/json' \
+                        -d '{ \
+                            "image": "${REGISTRY}/${IMAGE_NAME}", \
+                            "tag": "${IMAGE_TAG}", \
+                            "build_number": "${BUILD_NUMBER}", \
+                            "timestamp": "'\$(date -Iseconds)'" \
+                        }' \
+                        --connect-timeout 10 \
+                        --max-time 60
+                """
+                echo "✅ Webhook sent! Máy CD sẽ tự pull image và deploy."
+            }
+        }
+    }
+
+    // ── Post actions: chạy sau khi pipeline kết thúc ────────────────
+    post {
+        success {
+            echo """
+            ========================================
+            ✅ PIPELINE THÀNH CÔNG!
+            Image: ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
+            Máy CD đang deploy version mới...
+            ========================================
+            """
+        }
+        failure {
+            echo """
+            ========================================
+            ❌ PIPELINE THẤT BẠI!
+            Kiểm tra log để tìm nguyên nhân.
+            Image KHÔNG được build/push.
+            ========================================
+            """
+        }
+        always {
+            // Dọn dẹp workspace (optional)
+            echo "🧹 Pipeline kết thúc. Build #${BUILD_NUMBER}"
+        }
+    }
+}

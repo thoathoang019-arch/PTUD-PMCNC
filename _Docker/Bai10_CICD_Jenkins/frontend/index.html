@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bài 10 — CI/CD với Jenkins</title>
+    <style>
+        :root {
+            --primary: #0077b6;
+            --success: #2a9d8f;
+            --danger: #e63946;
+            --warning: #f4a261;
+            --bg: #f8f9fa;
+            --card: #ffffff;
+            --text: #212529;
+            --muted: #6c757d;
+            --border: #dee2e6;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: var(--bg); color: var(--text);
+            line-height: 1.6; padding: 16px;
+        }
+        .container { max-width: 960px; margin: 0 auto; }
+        h1 { font-size: 1.5rem; color: var(--primary); margin-bottom: 4px; }
+        .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 20px; }
+
+        /* Pipeline Visualization */
+        .pipeline {
+            display: flex; align-items: center; gap: 0;
+            background: var(--card); border-radius: 12px;
+            padding: 20px; margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            overflow-x: auto;
+        }
+        .stage {
+            flex: 1; min-width: 120px; text-align: center;
+            padding: 12px 8px; border-radius: 8px;
+            background: #e9ecef; position: relative;
+            transition: all 0.3s;
+        }
+        .stage.active { background: var(--primary); color: white; }
+        .stage.passed { background: var(--success); color: white; }
+        .stage.failed { background: var(--danger); color: white; }
+        .stage-icon { font-size: 1.5rem; margin-bottom: 4px; }
+        .stage-name { font-size: 0.75rem; font-weight: 600; }
+        .arrow { font-size: 1.2rem; color: var(--muted); padding: 0 4px; flex-shrink: 0; }
+
+        /* Cards */
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+        @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+        .card {
+            background: var(--card); border-radius: 12px;
+            padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        .card h2 { font-size: 1rem; color: var(--primary); margin-bottom: 12px;
+            display: flex; align-items: center; gap: 8px; }
+
+        /* Status badges */
+        .badge {
+            display: inline-block; padding: 2px 10px; border-radius: 12px;
+            font-size: 0.75rem; font-weight: 600;
+        }
+        .badge-success { background: #d4edda; color: #155724; }
+        .badge-danger { background: #f8d7da; color: #721c24; }
+        .badge-warning { background: #fff3cd; color: #856404; }
+        .badge-info { background: #d1ecf1; color: #0c5460; }
+
+        /* Info rows */
+        .info-row {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 8px 0; border-bottom: 1px solid var(--border);
+        }
+        .info-row:last-child { border-bottom: none; }
+        .info-label { color: var(--muted); font-size: 0.85rem; }
+        .info-value { font-weight: 600; font-size: 0.85rem; }
+
+        /* Buttons */
+        .btn {
+            display: inline-block; padding: 8px 16px; border: none;
+            border-radius: 8px; font-size: 0.85rem; font-weight: 600;
+            cursor: pointer; transition: all 0.2s; color: white;
+        }
+        .btn-primary { background: var(--primary); }
+        .btn-primary:hover { background: #005f8d; }
+        .btn-success { background: var(--success); }
+        .btn-danger { background: var(--danger); }
+        .btn-warning { background: var(--warning); color: var(--text); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .btn-group { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+
+        /* Result box */
+        .result {
+            margin-top: 12px; padding: 12px; border-radius: 8px;
+            background: #f1f3f5; font-family: 'Cascadia Code', monospace;
+            font-size: 0.8rem; max-height: 200px; overflow-y: auto;
+            white-space: pre-wrap; word-break: break-all;
+        }
+
+        /* Architecture diagram */
+        .arch-diagram {
+            font-family: 'Cascadia Code', monospace;
+            font-size: 0.7rem; line-height: 1.4;
+            background: #1e1e2e; color: #cdd6f4;
+            padding: 16px; border-radius: 8px;
+            overflow-x: auto; white-space: pre;
+        }
+        .arch-diagram .ci { color: #89b4fa; }
+        .arch-diagram .cd { color: #a6e3a1; }
+        .arch-diagram .arrow-d { color: #f9e2af; }
+        .arch-diagram .registry { color: #cba6f7; }
+
+        /* Concept section */
+        .concept {
+            background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%);
+            border-radius: 12px; padding: 16px; margin-bottom: 16px;
+        }
+        .concept h3 { font-size: 0.9rem; color: #1565c0; margin-bottom: 8px; }
+        .concept ul { padding-left: 20px; font-size: 0.85rem; }
+        .concept li { margin-bottom: 4px; }
+
+        /* Full width card */
+        .full-width { grid-column: 1 / -1; }
+
+        /* Log viewer */
+        .log-viewer {
+            background: #1e1e1e; color: #d4d4d4; padding: 12px;
+            border-radius: 8px; font-family: monospace; font-size: 0.75rem;
+            max-height: 300px; overflow-y: auto; white-space: pre-wrap;
+        }
+        .log-line { margin-bottom: 2px; }
+        .log-success { color: #4ec9b0; }
+        .log-error { color: #f14c4c; }
+        .log-info { color: #3794ff; }
+        .log-warn { color: #cca700; }
+
+        /* Version banner */
+        .version-banner {
+            background: linear-gradient(135deg, var(--primary), #00b4d8);
+            color: white; border-radius: 12px; padding: 20px;
+            text-align: center; margin-bottom: 20px;
+        }
+        .version-banner .ver { font-size: 2rem; font-weight: 700; }
+        .version-banner .detail { font-size: 0.85rem; opacity: 0.9; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Bài 10 — CI/CD với Jenkins + Deploy Webhook</h1>
+    <p class="subtitle">Phát triển ứng dụng phía máy chủ — Demo CI/CD Pipeline trên 2 máy</p>
+
+    <!-- Version Banner -->
+    <div class="version-banner">
+        <div class="ver" id="appVersion">Đang kiểm tra...</div>
+        <div class="detail" id="appDetail">Kết nối đến backend API để xem version</div>
+    </div>
+
+    <!-- Pipeline Visualization -->
+    <div class="pipeline" id="pipeline">
+        <div class="stage" id="stg-checkout">
+            <div class="stage-icon">📥</div>
+            <div class="stage-name">Checkout</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="stage" id="stg-test">
+            <div class="stage-icon">🧪</div>
+            <div class="stage-name">Unit Test</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="stage" id="stg-build">
+            <div class="stage-icon">🔨</div>
+            <div class="stage-name">Build Image</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="stage" id="stg-push">
+            <div class="stage-icon">📤</div>
+            <div class="stage-name">Push Registry</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="stage" id="stg-deploy">
+            <div class="stage-icon">🚀</div>
+            <div class="stage-name">Trigger CD</div>
+        </div>
+    </div>
+
+    <!-- Architecture Diagram -->
+    <div class="card" style="margin-bottom: 16px;">
+        <h2>📐 Kiến trúc CI/CD — 2 Máy</h2>
+        <div class="arch-diagram"><span class="ci">┌─────────────────── MÁY A: CI (Jenkins) ────────────────────┐</span>
+<span class="ci">│                                                             │</span>
+<span class="ci">│  Developer → git push → GitHub (Private Repo)              │</span>
+<span class="ci">│                              ↓                              │</span>
+<span class="ci">│                    Jenkins "Build Now"                       │</span>
+<span class="ci">│                    ┌──────────────────┐                     │</span>
+<span class="ci">│                    │ ① Checkout code  │                     │</span>
+<span class="ci">│                    │ ② Run Unit Tests │ ← Fail → ❌ STOP   │</span>
+<span class="ci">│                    │ ③ Build Image    │                     │</span>
+<span class="ci">│                    │ ④ Push to Registry ──────┐             │</span>
+<span class="ci">│                    │ ⑤ Trigger Deploy │      │             │</span>
+<span class="ci">│                    └───────┬──────────┘      │             │</span>
+<span class="ci">└────────────────────────────┼─────────────────┼─────────────┘</span>
+                             │                 │
+                    <span class="arrow-d">HTTP webhook</span>       <span class="registry">│ Docker Registry</span>
+                    <span class="arrow-d">POST /deploy</span>       <span class="registry">│ (ghcr.io / Docker Hub)</span>
+                             │                 │
+<span class="cd">┌────────────────────────────┼─────────────────┼─────────────┐</span>
+<span class="cd">│                            ▼                 │             │</span>
+<span class="cd">│                   Webhook Listener            │             │</span>
+<span class="cd">│                    ┌──────────────┐           │             │</span>
+<span class="cd">│                    │ docker pull ◄─────────────┘             │</span>
+<span class="cd">│                    │ docker compose up -d                    │</span>
+<span class="cd">│                    │ run migration                           │</span>
+<span class="cd">│                    └──────┬───────┘                          │</span>
+<span class="cd">│                           ▼                                  │</span>
+<span class="cd">│              ┌────────────────────────┐                     │</span>
+<span class="cd">│              │  Web API (new version) │                     │</span>
+<span class="cd">│              │    + Database (migrated)│                     │</span>
+<span class="cd">│              └────────────────────────┘                     │</span>
+<span class="cd">│                                                             │</span>
+<span class="cd">└─────────────────── MÁY B: CD (Deploy) ─────────────────────┘</span></div>
+    </div>
+
+    <div class="grid">
+        <!-- API Health Check -->
+        <div class="card">
+            <h2>🏥 Kiểm tra Backend API</h2>
+            <p style="font-size:0.85rem;color:var(--muted);margin-bottom:12px;">
+                Gọi API thật để kiểm tra backend đang chạy đúng version.
+            </p>
+            <div class="btn-group">
+                <button class="btn btn-primary" onclick="checkHealth()">Kiểm tra Health</button>
+                <button class="btn btn-success" onclick="getProducts()">Lấy sản phẩm</button>
+                <button class="btn btn-warning" onclick="getVersion()">Xem Version</button>
+            </div>
+            <div class="result" id="apiResult">Nhấn nút để gọi API...</div>
+        </div>
+
+        <!-- Pipeline Demo -->
+        <div class="card">
+            <h2>🎭 Mô phỏng Pipeline</h2>
+            <p style="font-size:0.85rem;color:var(--muted);margin-bottom:12px;">
+                Mô phỏng từng bước pipeline để demo trực quan trên lớp.
+            </p>
+            <div class="btn-group">
+                <button class="btn btn-primary" onclick="simulatePipeline(true)">
+                    ▶ Pipeline PASS
+                </button>
+                <button class="btn btn-danger" onclick="simulatePipeline(false)">
+                    ▶ Pipeline FAIL (test fail)
+                </button>
+                <button class="btn btn-warning" onclick="resetPipeline()">
+                    ↺ Reset
+                </button>
+            </div>
+            <div class="result" id="pipelineLog">Nhấn để mô phỏng pipeline...</div>
+        </div>
+
+        <!-- Unit Test Demo -->
+        <div class="card">
+            <h2>🧪 Unit Test — Tính phí vận chuyển</h2>
+            <p style="font-size:0.85rem;color:var(--muted);margin-bottom:12px;">
+                Demo logic test: nhập giá trị đơn hàng → kiểm tra phí ship.
+            </p>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <select id="testMethod" style="padding:6px;border-radius:6px;border:1px solid var(--border);">
+                    <option value="Standard">Standard (≥500k → miễn phí)</option>
+                    <option value="Express">Express (luôn 30k)</option>
+                    <option value="SameDay">SameDay (luôn 50k)</option>
+                    <option value="International">International (luôn 200k)</option>
+                </select>
+                <input type="number" id="testAmount" placeholder="Giá trị đơn (VNĐ)" value="600000"
+                    style="padding:6px;border-radius:6px;border:1px solid var(--border);width:150px;">
+                <button class="btn btn-primary" onclick="runLocalTest()">Chạy Test</button>
+            </div>
+            <div class="result" id="testResult">Kết quả test sẽ hiện ở đây...</div>
+        </div>
+
+        <!-- CD Webhook -->
+        <div class="card">
+            <h2>🎯 Webhook Listener (Máy CD)</h2>
+            <p style="font-size:0.85rem;color:var(--muted);margin-bottom:12px;">
+                Kiểm tra trạng thái webhook listener trên Máy CD.
+            </p>
+            <div style="margin-bottom:8px;">
+                <label style="font-size:0.85rem;color:var(--muted);">CD Server URL:</label>
+                <input type="text" id="cdServerUrl" value="http://192.168.1.100:5000"
+                    style="width:100%;padding:6px;border-radius:6px;border:1px solid var(--border);margin-top:4px;">
+            </div>
+            <div class="btn-group">
+                <button class="btn btn-primary" onclick="checkCDStatus()">Kiểm tra Status</button>
+                <button class="btn btn-success" onclick="viewCDLogs()">Xem Deploy Logs</button>
+            </div>
+            <div class="result" id="cdResult">Kết quả sẽ hiện ở đây...</div>
+        </div>
+
+        <!-- Shipping Fee API Test -->
+        <div class="card full-width">
+            <h2>📦 Test API Thật — Phí vận chuyển qua Backend</h2>
+            <p style="font-size:0.85rem;color:var(--muted);margin-bottom:12px;">
+                Gọi API backend thật để so sánh kết quả với Unit Test ở trên.
+                Dùng khi demo bước 8: "thêm code mới → deploy → thấy thay đổi".
+            </p>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                <select id="apiShipMethod" style="padding:6px;border-radius:6px;border:1px solid var(--border);">
+                    <option value="1">Standard</option>
+                    <option value="2" selected>Express</option>
+                    <option value="3">SameDay</option>
+                    <option value="4">International</option>
+                </select>
+                <input type="number" id="apiShipAmount" value="450000" placeholder="Giá trị đơn"
+                    style="padding:6px;border-radius:6px;border:1px solid var(--border);width:150px;">
+                <button class="btn btn-primary" onclick="testShippingAPI()">
+                    Gọi API (OCP Strategy)
+                </button>
+                <button class="btn btn-warning" onclick="testShippingLegacy()">
+                    Gọi API (Legacy vi phạm OCP)
+                </button>
+            </div>
+            <div class="result" id="shippingResult">Kết quả API sẽ hiện ở đây...</div>
+        </div>
+
+        <!-- Concept Cards -->
+        <div class="card full-width">
+            <h2>📚 Khái niệm chính</h2>
+            <div class="grid" style="margin-top:12px;">
+                <div class="concept">
+                    <h3>CI — Continuous Integration</h3>
+                    <ul>
+                        <li>Tự động: build + test mỗi khi có code mới</li>
+                        <li>Test FAIL → DỪNG, không build image</li>
+                        <li>"Build ra được" ≠ "code đúng"</li>
+                        <li>Pipeline as Code (Jenkinsfile) — version control</li>
+                    </ul>
+                </div>
+                <div class="concept">
+                    <h3>CD — Continuous Deployment</h3>
+                    <ul>
+                        <li>Image đã test → push Registry → deploy</li>
+                        <li>Máy CD KHÔNG build code — chỉ pull image</li>
+                        <li>Webhook: CI "gõ cửa" CD sau khi push xong</li>
+                        <li>Migration tự chạy khi app khởi động</li>
+                    </ul>
+                </div>
+                <div class="concept">
+                    <h3>Unit Test</h3>
+                    <ul>
+                        <li>Test 1 method/function — độc lập</li>
+                        <li>Không cần database, network</li>
+                        <li>Pattern: Arrange → Act → Assert</li>
+                        <li>Framework: xUnit (.NET), Jest (JS), PyTest</li>
+                    </ul>
+                </div>
+                <div class="concept">
+                    <h3>Vì sao cần 2 máy?</h3>
+                    <ul>
+                        <li>Thực tế: CI server ≠ Production server</li>
+                        <li>CI build → đóng gói image → push registry</li>
+                        <li>CD pull image → deploy (không biết source code)</li>
+                        <li>Jenkins localhost → không có webhook từ GitHub</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <div style="text-align:center;color:var(--muted);font-size:0.8rem;padding:16px 0;">
+        Bài 10 — CI/CD với Jenkins | Tái sử dụng kiến thức: SOLID (Bài 01–04), Docker (Bài 05),
+        Compose (Bài 07), NGINX (Bài 08), MinIO (Bài 09)
+    </div>
+</div>
+
+<script>
+// ── API Calls ───────────────────────────────────────────────
+const API_BASE = '/api';
+
+async function fetchAPI(url, options = {}) {
+    try {
+        const res = await fetch(url, options);
+        const text = await res.text();
+        try { return { status: res.status, data: JSON.parse(text) }; }
+        catch { return { status: res.status, data: text }; }
+    } catch (err) {
+        return { status: 0, data: `Lỗi kết nối: ${err.message}` };
+    }
+}
+
+async function checkHealth() {
+    const el = document.getElementById('apiResult');
+    el.textContent = '⏳ Đang kiểm tra...';
+    const r = await fetchAPI('/');
+    el.textContent = r.status === 200
+        ? `✅ Backend đang chạy!\n\n${typeof r.data === 'string' ? r.data : JSON.stringify(r.data, null, 2)}`
+        : `❌ HTTP ${r.status}\n${JSON.stringify(r.data, null, 2)}`;
+}
+
+async function getProducts() {
+    const el = document.getElementById('apiResult');
+    el.textContent = '⏳ Đang lấy sản phẩm...';
+    const r = await fetchAPI(`${API_BASE}/products`);
+    el.textContent = r.status === 200
+        ? `✅ ${Array.isArray(r.data) ? r.data.length : '?'} sản phẩm:\n${JSON.stringify(r.data, null, 2)}`
+        : `❌ HTTP ${r.status}\n${JSON.stringify(r.data, null, 2)}`;
+}
+
+async function getVersion() {
+    const el = document.getElementById('apiResult');
+    el.textContent = '⏳ Đang kiểm tra version...';
+    // Gọi root endpoint và products để xem thông tin
+    const [root, products] = await Promise.all([
+        fetchAPI('/'),
+        fetchAPI(`${API_BASE}/products`)
+    ]);
+    const serverHeader = 'Kestrel (ASP.NET Core)';
+    el.textContent = `🏷️ API Info:\n`
+        + `  Status: ${root.status === 200 ? '✅ Running' : '❌ Down'}\n`
+        + `  Server: ${serverHeader}\n`
+        + `  Products API: ${products.status === 200 ? '✅ OK' : '❌ Error'}\n`
+        + `  Timestamp: ${new Date().toISOString()}`;
+}
+
+// ── Pipeline Simulation ─────────────────────────────────────
+const stages = ['stg-checkout', 'stg-test', 'stg-build', 'stg-push', 'stg-deploy'];
+
+function resetPipeline() {
+    stages.forEach(id => {
+        document.getElementById(id).className = 'stage';
+    });
+    document.getElementById('pipelineLog').textContent = 'Pipeline reset. Nhấn để mô phỏng lại.';
+}
+
+async function simulatePipeline(testPass) {
+    resetPipeline();
+    const log = document.getElementById('pipelineLog');
+    log.textContent = '';
+
+    const stageNames = ['Checkout', 'Unit Test', 'Build Image', 'Push Registry', 'Trigger Deploy'];
+    const stageDetails = [
+        '📥 Pulling code from GitHub Private Repository...\n   git clone git@github.com:team/onlineshop.git\n   Commit: abc1234',
+        testPass
+            ? '🧪 Running dotnet test...\n   ✅ ShippingFeeServiceTests: 8 passed\n   ✅ ProductAppServiceTests: 3 passed\n   Total: 11 passed, 0 failed'
+            : '🧪 Running dotnet test...\n   ✅ ShippingFeeServiceTests: 7 passed\n   ❌ Standard_FreeShipping_WhenOrderAbove500k: FAILED\n      Expected: 0, Actual: 15000\n   Total: 10 passed, 1 FAILED',
+        '🔨 docker build -t ghcr.io/team/onlineshop-api:5 .\n   Step 1/10: FROM mcr.microsoft.com/dotnet/sdk:10.0\n   Step 10/10: CMD []\n   Built: ghcr.io/team/onlineshop-api:5',
+        '📤 docker push ghcr.io/team/onlineshop-api:5\n   Pushing layer 1/4... done\n   Pushing layer 4/4... done\n   ✅ Pushed to GitHub Container Registry',
+        '🚀 curl -X POST http://192.168.1.100:5000/deploy\n   Sent: {"image":"ghcr.io/team/onlineshop-api","tag":"5"}\n   Response: {"status":"deploying"}\n   ✅ Máy CD sẽ tự pull image và deploy!'
+    ];
+
+    const failAtStage = testPass ? -1 : 1; // Test stage = index 1
+
+    for (let i = 0; i < stages.length; i++) {
+        if (i === failAtStage + 1 && !testPass) break;
+
+        document.getElementById(stages[i]).className = 'stage active';
+        log.textContent += `\n━━━ Stage: ${stageNames[i]} ━━━\n`;
+        log.textContent += stageDetails[i] + '\n';
+        log.scrollTop = log.scrollHeight;
+
+        await new Promise(r => setTimeout(r, 1500));
+
+        if (i === failAtStage && !testPass) {
+            document.getElementById(stages[i]).className = 'stage failed';
+            log.textContent += '\n❌ PIPELINE FAILED at Unit Test!\n';
+            log.textContent += '   → Image KHÔNG được build/push.\n';
+            log.textContent += '   → Sửa code cho test PASS rồi chạy lại.\n';
+            return;
+        }
+
+        document.getElementById(stages[i]).className = 'stage passed';
+    }
+
+    log.textContent += '\n✅ PIPELINE THÀNH CÔNG! Version mới đã được deploy.\n';
+}
+
+// ── Unit Test Simulation ────────────────────────────────────
+function runLocalTest() {
+    const method = document.getElementById('testMethod').value;
+    const amount = parseFloat(document.getElementById('testAmount').value) || 0;
+    const el = document.getElementById('testResult');
+
+    let expectedFee, actualFee, testName;
+
+    switch(method) {
+        case 'Standard':
+            expectedFee = amount >= 500000 ? 0 : 15000;
+            actualFee = expectedFee;
+            testName = amount >= 500000
+                ? 'Standard_FreeShipping_WhenOrderAbove500k'
+                : 'Standard_ChargesFee_WhenOrderBelow500k';
+            break;
+        case 'Express':
+            expectedFee = 30000; actualFee = 30000;
+            testName = 'Express_AlwaysCharges30k';
+            break;
+        case 'SameDay':
+            expectedFee = 50000; actualFee = 50000;
+            testName = 'SameDay_AlwaysCharges50k';
+            break;
+        case 'International':
+            expectedFee = 200000; actualFee = 200000;
+            testName = 'International_AlwaysCharges200k';
+            break;
+    }
+
+    const passed = expectedFee === actualFee;
+    el.textContent = `Test: ${testName}\n`
+        + `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`
+        + `Arrange:\n`
+        + `  Method: ${method}\n`
+        + `  Amount: ${amount.toLocaleString('vi-VN')}đ\n\n`
+        + `Act:\n`
+        + `  CalculateFee(${method}, ${amount}) = ${actualFee.toLocaleString('vi-VN')}đ\n\n`
+        + `Assert:\n`
+        + `  Expected: ${expectedFee.toLocaleString('vi-VN')}đ\n`
+        + `  Actual:   ${actualFee.toLocaleString('vi-VN')}đ\n\n`
+        + (passed ? '✅ PASSED' : '❌ FAILED');
+}
+
+// ── CD Webhook Listener ─────────────────────────────────────
+async function checkCDStatus() {
+    const url = document.getElementById('cdServerUrl').value;
+    const el = document.getElementById('cdResult');
+    el.textContent = '⏳ Đang kiểm tra...';
+    const r = await fetchAPI(`${url}/status`);
+    el.textContent = r.status === 200
+        ? `✅ Webhook Listener đang chạy!\n${JSON.stringify(r.data, null, 2)}`
+        : `❌ Không kết nối được: ${r.data}\n(Kiểm tra IP và port Máy CD)`;
+}
+
+async function viewCDLogs() {
+    const url = document.getElementById('cdServerUrl').value;
+    const el = document.getElementById('cdResult');
+    el.textContent = '⏳ Đang lấy logs...';
+    const r = await fetchAPI(`${url}/logs`);
+    el.textContent = r.status === 200
+        ? `📋 Deploy Logs:\n${r.data}`
+        : `❌ Không lấy được logs: ${r.data}`;
+}
+
+// ── Shipping API ────────────────────────────────────────────
+async function testShippingAPI() {
+    const method = document.getElementById('apiShipMethod').value;
+    const amount = document.getElementById('apiShipAmount').value;
+    const el = document.getElementById('shippingResult');
+    el.textContent = '⏳ Đang gọi API...';
+    const r = await fetchAPI(`${API_BASE}/shipping/fee-preview?method=${method}&itemsAmount=${amount}`);
+    el.textContent = `API: GET /api/shipping/fee-preview (OCP Strategy)\n`
+        + `Method: ${['','Standard','Express','SameDay','International'][method]}\n`
+        + `Amount: ${parseInt(amount).toLocaleString('vi-VN')}đ\n\n`
+        + `Response (HTTP ${r.status}):\n${JSON.stringify(r.data, null, 2)}`;
+}
+
+async function testShippingLegacy() {
+    const method = document.getElementById('apiShipMethod').value;
+    const amount = document.getElementById('apiShipAmount').value;
+    const el = document.getElementById('shippingResult');
+    el.textContent = '⏳ Đang gọi API...';
+    const r = await fetchAPI(`${API_BASE}/shipping/legacy-fee-preview?method=${method}&itemsAmount=${amount}`);
+    el.textContent = `API: GET /api/shipping/legacy-fee-preview (Legacy - vi phạm OCP)\n`
+        + `Response (HTTP ${r.status}):\n${JSON.stringify(r.data, null, 2)}`;
+}
+
+// ── Init: check API on load ─────────────────────────────────
+(async function() {
+    const r = await fetchAPI(`${API_BASE}/products`);
+    const verEl = document.getElementById('appVersion');
+    const detEl = document.getElementById('appDetail');
+    if (r.status === 200) {
+        verEl.textContent = '✅ API Running';
+        detEl.textContent = `${Array.isArray(r.data) ? r.data.length : '?'} sản phẩm | ${new Date().toLocaleString('vi-VN')}`;
+    } else {
+        verEl.textContent = '⚠️ API Offline';
+        detEl.textContent = 'Backend chưa chạy hoặc đang khởi động...';
+    }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- MinIO SDK — tương thích chuẩn S3 API -->
+    <!-- Cùng SDK này có thể dùng cho AWS S3, Cloudflare R2 (chỉ đổi endpoint + key) -->
+    <PackageReference Include="Minio" Version="6.0.4" />
+  </ItemGroup>
+</Project>

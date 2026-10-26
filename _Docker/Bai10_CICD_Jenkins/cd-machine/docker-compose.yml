@@ -1,0 +1,89 @@
+# ============================================================
+# Docker Compose — Máy CD (Máy B) — Bài 10: CI/CD
+# ============================================================
+# Đây là file docker-compose chạy trên MÁY TRIỂN KHAI (CD)
+# KHÔNG chạy trên máy Jenkins (CI)!
+#
+# Đặc điểm:
+#   - Backend dùng IMAGE TỪ REGISTRY (đã build bởi Jenkins)
+#   - KHÔNG build từ source code (máy CD không biết source code)
+#   - Database, Redis chạy local trên máy CD
+#   - NGINX reverse proxy cho frontend + backend
+#
+# Luồng deploy:
+#   1. Jenkins push image lên registry
+#   2. Jenkins gọi webhook → webhook-listener.js
+#   3. Listener: docker pull image → docker compose up -d
+#   4. App khởi động → tự chạy migration → sẵn sàng serve
+# ============================================================
+
+services:
+
+  # ── Database ──────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-appuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-supersecret}
+      POSTGRES_DB: ${POSTGRES_DB:-onlineshopdb}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-appuser}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-network
+
+  # ── Redis ─────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-network
+
+  # ── Backend — IMAGE TỪ REGISTRY (không build local) ──────
+  # ⭐ Đây là điểm khác biệt so với Bài 07/08/09:
+  #    - Các bài trước: build: context: ./backend
+  #    - Bài 10 CD: image: ${IMAGE_NAME}:${IMAGE_TAG}
+  #    → Image đã được Jenkins build + test + push
+  backend:
+    image: ${IMAGE_NAME:-ghcr.io/your-username/onlineshop-api}:${IMAGE_TAG:-latest}
+    environment:
+      - ConnectionStrings__DefaultConnection=Host=db;Database=${POSTGRES_DB:-onlineshopdb};Username=${POSTGRES_USER:-appuser};Password=${POSTGRES_PASSWORD:-supersecret}
+      - Redis__ConnectionString=redis:6379
+      - ASPNETCORE_ENVIRONMENT=Production
+      # Thông tin version để hiển thị trên API
+      - APP_VERSION=${IMAGE_TAG:-latest}
+      - BUILD_NUMBER=${IMAGE_TAG:-0}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  # ── NGINX — Reverse Proxy ─────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    depends_on:
+      - backend
+    networks:
+      - app-network
+
+volumes:
+  postgres_data:
+
+networks:
+  app-network:
+    driver: bridge

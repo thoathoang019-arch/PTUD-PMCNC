@@ -1,0 +1,39 @@
+# ==========================================
+# .gitignore - PTUD PMCNC Repository
+# ==========================================
+
+# 1. Bỏ qua các file nén và thư mục thừa (theo yêu cầu)
+*.zip
+Bai03_CleanArchitecture/
+Buoi7/
+EventGO/
+OnlineShop/
+SmartHome.Server/
+SolidApplication/
+WebLibrary (1)/
+
+# 2. .NET Build & Cache Artifacts
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+_ReSharper*/
+*.dotCover
+
+# 3. Môi trường & Bí mật (Secrets)
+# Giữ lại các file .env.example, bỏ qua .env chứa thông tin nhạy cảm
+.env
+!.env.example
+
+# 4. OS & IDE rác
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+
+# 5. Log & Debug files
+*.log

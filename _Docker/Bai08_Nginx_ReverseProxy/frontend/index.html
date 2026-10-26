@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OnlineShop - Frontend</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #f5f7fa; color: #333; }
+        .header { background: linear-gradient(135deg, #667eea, #764ba2); color: #fff; padding: 20px 40px; }
+        .header h1 { font-size: 1.8rem; }
+        .header p { opacity: 0.9; margin-top: 4px; font-size: 0.95rem; }
+        .container { max-width: 900px; margin: 30px auto; padding: 0 20px; }
+        .card { background: #fff; border-radius: 10px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        .card h2 { color: #667eea; margin-bottom: 12px; font-size: 1.2rem; }
+        .btn { background: #667eea; color: #fff; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 0.95rem; margin-right: 8px; margin-bottom: 8px; transition: background 0.2s; }
+        .btn:hover { background: #5a6fd6; }
+        .btn.secondary { background: #764ba2; }
+        .btn.secondary:hover { background: #6a3f96; }
+        .btn.warning { background: #e67e22; }
+        .btn.warning:hover { background: #d35400; }
+        #result { background: #1e1e2e; color: #a6e3a1; padding: 16px; border-radius: 8px; margin-top: 16px; font-family: 'Fira Code', 'Consolas', monospace; font-size: 0.85rem; white-space: pre-wrap; word-break: break-all; min-height: 60px; max-height: 400px; overflow-y: auto; }
+        .info-box { background: #eef2ff; border-left: 4px solid #667eea; padding: 12px 16px; border-radius: 0 8px 8px 0; margin-bottom: 16px; font-size: 0.9rem; }
+        .status { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
+        .status.ok { background: #d1fae5; color: #065f46; }
+        .status.err { background: #fee2e2; color: #991b1b; }
+        .instance-tag { display: inline-block; background: #667eea; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; margin-left: 6px; }
+        .footer { text-align: center; padding: 20px; color: #888; font-size: 0.85rem; }
+        .counter { font-size: 2rem; font-weight: 700; color: #667eea; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🛒 OnlineShop Frontend</h1>
+        <p>Bài 8 — NGINX Reverse Proxy &amp; Upstream | Nhóm 6</p>
+    </div>
+
+    <div class="container">
+        <!-- Demo 1: Gọi API qua cùng domain (không CORS) -->
+        <div class="card">
+            <h2>📡 Demo 1: Gọi API qua Reverse Proxy (không lỗi CORS)</h2>
+            <div class="info-box">
+                Frontend ở <code>/</code> và Backend ở <code>/api/</code> — cùng domain, cùng origin → không bị lỗi CORS.
+            </div>
+            <button class="btn" onclick="callApi('/api/products')">GET /api/products</button>
+            <button class="btn secondary" onclick="callApi('/api/shipping/fee-preview?method=Express&itemsAmount=450000')">GET /api/shipping/fee-preview</button>
+            <button class="btn secondary" onclick="callApi('/api/orders')">GET /api/orders</button>
+        </div>
+
+        <!-- Demo 2: Upstream Load Balancing -->
+        <div class="card">
+            <h2>⚖️ Demo 2: Upstream Load Balancing (Round-Robin)</h2>
+            <div class="info-box">
+                Gọi lặp lại API — mỗi request sẽ được NGINX điều phối tới các backend instance khác nhau (kiểm tra <code>X-Served-By</code> header hoặc response body).
+            </div>
+            <button class="btn" onclick="testLoadBalancing(5)">Gọi 5 lần liên tiếp</button>
+            <button class="btn secondary" onclick="testLoadBalancing(10)">Gọi 10 lần liên tiếp</button>
+            <div id="lb-result" style="margin-top:12px;"></div>
+        </div>
+
+        <!-- Demo 3: client_max_body_size -->
+        <div class="card">
+            <h2>📦 Demo 3: Giới hạn Body Size (client_max_body_size)</h2>
+            <div class="info-box">
+                Mặc định NGINX chỉ cho phép body ≤ 1MB. Gửi body lớn hơn sẽ bị lỗi <strong>413 Request Entity Too Large</strong>.
+            </div>
+            <button class="btn warning" onclick="testBodySize(2)">Gửi body 2MB (sẽ lỗi 413 nếu chưa cấu hình)</button>
+            <button class="btn" onclick="testBodySize(0.5)">Gửi body 0.5MB (sẽ thành công)</button>
+        </div>
+
+        <!-- Kết quả -->
+        <div class="card">
+            <h2>📋 Kết quả API Response</h2>
+            <div id="result">// Kết quả sẽ hiện ở đây khi bạn bấm các nút phía trên...</div>
+        </div>
+
+        <!-- SPA Route Test -->
+        <div class="card">
+            <h2>🔗 Demo: SPA Routing (try_files fallback)</h2>
+            <div class="info-box">
+                Nhấn các link bên dưới — dù đường dẫn không tồn tại file vật lý, NGINX vẫn trả về <code>index.html</code> nhờ <code>try_files $uri $uri/ /index.html</code>.
+            </div>
+            <a href="/about" class="btn" style="text-decoration:none;display:inline-block;">/about</a>
+            <a href="/products/123" class="btn secondary" style="text-decoration:none;display:inline-block;">/products/123</a>
+            <a href="/dashboard" class="btn secondary" style="text-decoration:none;display:inline-block;">/dashboard</a>
+            <p style="margin-top:10px;color:#888;font-size:0.85rem;">→ Tất cả đều hiển thị trang này (SPA routing hoạt động đúng!)</p>
+        </div>
+    </div>
+
+    <div class="footer">
+        &copy; 2026 OnlineShop — Bài 8: NGINX Reverse Proxy &amp; Upstream | PTUD PMCNC
+    </div>
+
+    <script>
+        const resultBox = document.getElementById('result');
+
+        async function callApi(url) {
+            resultBox.textContent = `⏳ Đang gọi ${url} ...`;
+            try {
+                const start = performance.now();
+                const res = await fetch(url);
+                const elapsed = (performance.now() - start).toFixed(0);
+                const servedBy = res.headers.get('X-Served-By') || 'N/A';
+                const status = res.status;
+                const body = await res.text();
+                let formatted;
+                try { formatted = JSON.stringify(JSON.parse(body), null, 2); } catch { formatted = body; }
+                resultBox.textContent =
+`✅ ${res.status} ${res.statusText}  (${elapsed}ms)
+📍 X-Served-By: ${servedBy}
+📍 URL: ${url}
+─────────────────────────────────
+${formatted}`;
+            } catch (err) {
+                resultBox.textContent = `❌ Lỗi: ${err.message}`;
+            }
+        }
+
+        async function testLoadBalancing(times) {
+            const lbResult = document.getElementById('lb-result');
+            lbResult.innerHTML = '⏳ Đang gọi...';
+            const results = [];
+            for (let i = 0; i < times; i++) {
+                try {
+                    const res = await fetch('/api/products');
+                    const servedBy = res.headers.get('X-Served-By') || 'unknown';
+                    results.push({ call: i + 1, instance: servedBy, status: res.status });
+                } catch (err) {
+                    results.push({ call: i + 1, instance: 'ERROR', status: 0 });
+                }
+            }
+            // Thống kê
+            const counts = {};
+            results.forEach(r => { counts[r.instance] = (counts[r.instance] || 0) + 1; });
+            let html = '<table style="width:100%;border-collapse:collapse;font-size:0.85rem;">';
+            html += '<tr style="background:#f0f0f0;"><th style="padding:6px;border:1px solid #ddd;">Lần gọi</th><th style="padding:6px;border:1px solid #ddd;">Instance phục vụ</th><th style="padding:6px;border:1px solid #ddd;">Status</th></tr>';
+            results.forEach(r => {
+                const color = r.instance.includes('1') ? '#667eea' : r.instance.includes('2') ? '#764ba2' : '#888';
+                html += `<tr><td style="padding:6px;border:1px solid #ddd;text-align:center;">#${r.call}</td><td style="padding:6px;border:1px solid #ddd;"><span style="color:${color};font-weight:600;">${r.instance}</span></td><td style="padding:6px;border:1px solid #ddd;text-align:center;">${r.status}</td></tr>`;
+            });
+            html += '</table>';
+            html += '<div style="margin-top:10px;font-size:0.85rem;"><strong>Thống kê phân phối:</strong> ';
+            Object.entries(counts).forEach(([k, v]) => { html += `<span class="instance-tag">${k}: ${v} lần</span> `; });
+            html += '</div>';
+            lbResult.innerHTML = html;
+
+            resultBox.textContent = `✅ Đã gọi ${times} lần — NGINX upstream round-robin phân phối request tới các backend instance khác nhau.\n\nChi tiết:\n${results.map(r => `  #${r.call} → ${r.instance} (${r.status})`).join('\n')}`;
+        }
+
+        async function testBodySize(sizeMB) {
+            resultBox.textContent = `⏳ Đang gửi body ${sizeMB}MB ...`;
+            try {
+                const data = 'x'.repeat(Math.floor(sizeMB * 1024 * 1024));
+                const start = performance.now();
+                const res = await fetch('/api/products/test-upload', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ payload: data })
+                });
+                const elapsed = (performance.now() - start).toFixed(0);
+                const body = await res.text();
+                if (res.status === 413) {
+                    resultBox.textContent = `⚠️ ${res.status} Request Entity Too Large  (${elapsed}ms)\n\n→ NGINX đã chặn request vì body (${sizeMB}MB) vượt quá client_max_body_size!\n→ Cần tăng giá trị client_max_body_size trong nginx.conf để cho phép.`;
+                } else {
+                    resultBox.textContent = `✅ ${res.status} ${res.statusText}  (${elapsed}ms)\n\n→ Body ${sizeMB}MB đã được NGINX chấp nhận chuyển tới backend.\n\nResponse: ${body}`;
+                }
+            } catch (err) {
+                resultBox.textContent = `❌ Lỗi: ${err.message}\n\n→ Có thể NGINX đã đóng kết nối do body quá lớn (413).`;
+            }
+        }
+    </script>
+</body>
+</html>

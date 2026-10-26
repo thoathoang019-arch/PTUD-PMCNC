@@ -1,0 +1,133 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# docker-compose.yml - Bài 7: Multi-container & Multi-instance
+# Cấu trúc: Nginx (Load Balancer) + Multi-instance Backend + PostgreSQL + Redis
+# ═══════════════════════════════════════════════════════════════════════════
+
+services:
+
+  # ── 1) PostgreSQL (Database) ──────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: onlineshop_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pg_data:/var/lib/postgresql/data          # named volume - persistent data
+    networks:
+      - shop_net
+    # Healthcheck đảm bảo DB đã sẵn sàng nhận kết nối
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    # Giới hạn tài nguyên phần cứng để DB không ăn hết RAM server
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    # Xoay vòng log để không đầy ổ cứng
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── 2) Redis (Cache System) ─────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: onlineshop_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - shop_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── 3) Backend (ASP.NET Core - Đa bản sao / Multi-instance) ─────────
+  backend:
+    build:
+      context: ./backend               # Code Backend đã được tách riêng vào thư mục này
+      dockerfile: Dockerfile
+    image: onlineshop-backend:latest
+    # Bỏ container_name vì khi scale > 1, các container sẽ bị trùng tên
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      # Service Discovery: Kết nối bằng TÊN SERVICE (db, redis)
+      ConnectionStrings__Default: Server=${DB_HOST};Database=${POSTGRES_DB};User Id=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};
+      RedisHost: ${REDIS_HOST}
+    expose:
+      - "8080" # Mở cổng 8080 NỘI BỘ trong mạng shop_net để Nginx gọi
+    depends_on:
+      db:
+        condition: service_healthy              # Chỉ chạy khi DB báo khỏe
+      redis:
+        condition: service_healthy
+    networks:
+      - shop_net
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── 4) Nginx (Reverse Proxy & Load Balancer) ────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: onlineshop_nginx
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+    ports:
+      - "8080:80"   # Ánh xạ Cổng 8080 ở máy thật trỏ vào cổng 80 của Nginx
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - shop_net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# Khai báo Mạng (Network) và Khối lưu trữ (Volume)
+networks:
+  shop_net:
+    driver: bridge
+
+volumes:
+  pg_data:
+  redis_data:
